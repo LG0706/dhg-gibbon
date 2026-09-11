@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Vite production build
+dist/
+
+# Local recordings
+*.wav
+*.WAV
+
+# Analysis exports
+*.zip
+
+# macOS
+.DS_Store
+
+# Local benchmark data
+benchmarks/
+*.benchmark.json
