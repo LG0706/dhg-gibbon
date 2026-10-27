@@ -38,10 +38,18 @@ export class ReviewWorkspace {
           <button class="secondary-button" data-role="play" type="button">播放</button>
           <span class="audio-time numeric" data-role="time">0:00 / 0:00</span>
         </div>
-        <div class="timeline" data-role="timeline" tabindex="0" role="slider" aria-label="录音时间轴：点击定位，左右方向键前后 1 秒，加 Shift 为 5 秒，空格播放或暂停" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" aria-valuetext="0:00 / 0:00">
-          <div class="timeline-progress" data-role="progress"></div>
-          <div class="timeline-segments" data-role="segments"></div>
-          <div class="timeline-playhead" data-role="playhead"></div>
+        <div class="timeline-wrap">
+          <div class="timeline" data-role="timeline" tabindex="0" role="slider" aria-label="录音时间轴：点击定位，左右方向键前后 1 秒，加 Shift 为 5 秒，空格播放或暂停" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" aria-valuetext="0:00 / 0:00">
+            <div class="timeline-progress" data-role="progress"></div>
+            <div class="timeline-segments" data-role="segments"></div>
+            <div class="timeline-playhead" data-role="playhead"></div>
+          </div>
+          <div class="timeline-legend" aria-hidden="true">
+            <span class="legend-item"><i class="legend-swatch legend-candidate"></i>候选片段</span>
+            <span class="legend-item"><i class="legend-swatch legend-detection"></i>检测片段</span>
+            <span class="legend-item"><i class="legend-swatch legend-progress"></i>已播放</span>
+            <span class="legend-item"><i class="legend-swatch legend-playhead"></i>播放位置</span>
+          </div>
         </div>
         <div class="audio-bar-actions">
           <button class="secondary-button" data-role="seek-back" type="button">−5 秒</button>

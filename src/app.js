@@ -146,32 +146,35 @@ export async function mountApp(root) {
     <div class="section-heading">
       <div>
         <h2 id="parameter-heading">分析参数</h2>
-        <p>仅开放两项常用设置，其余参数保持东黑冠长臂猿推荐值不变。</p>
+        <p>可按需修改 RIBBIT 分数门槛与检测频率范围；不修改则直接使用东黑冠长臂猿推荐值。</p>
       </div>
+      <button class="secondary-button" data-role="parameter-toggle" type="button" aria-expanded="false" aria-controls="parameter-body">展开</button>
     </div>
-    <div class="parameter-grid">
-      <label class="field">
-        <span>RIBBIT 分数门槛（0–1）</span>
-        <input type="number" data-role="threshold" min="0" max="1" step="0.01" value="0.1" inputmode="decimal" />
-        <small>评分高于该值的片段才进入人工复核。调低→进入复核的片段更多；调高→更少。推荐值 0.1。</small>
-      </label>
-      <div class="field">
-        <span>检测频率范围（Hz）</span>
-        <div class="dual-range">
-          <div class="dual-range-track"></div>
-          <div class="dual-range-fill" data-role="band-fill"></div>
-          <input type="range" data-role="band-low" min="1000" max="2000" step="10" value="1300" aria-label="检测频率下限（Hz）" />
-          <input type="range" data-role="band-high" min="1000" max="2000" step="10" value="1600" aria-label="检测频率上限（Hz）" />
+    <div id="parameter-body" data-role="parameter-body" hidden>
+      <div class="parameter-grid">
+        <label class="field">
+          <span>RIBBIT 分数门槛（0–1）</span>
+          <input type="number" data-role="threshold" min="0" max="1" step="0.01" value="0.1" inputmode="decimal" />
+          <small>评分高于该值的片段才进入人工复核。调低→进入复核的片段更多；调高→更少。推荐值 0.1。</small>
+        </label>
+        <div class="field">
+          <span>检测频率范围（Hz）</span>
+          <div class="dual-range">
+            <div class="dual-range-track"></div>
+            <div class="dual-range-fill" data-role="band-fill"></div>
+            <input type="range" data-role="band-low" min="1000" max="2000" step="10" value="1300" aria-label="检测频率下限（Hz）" />
+            <input type="range" data-role="band-high" min="1000" max="2000" step="10" value="1600" aria-label="检测频率上限（Hz）" />
+          </div>
+          <small data-role="band-readout"></small>
         </div>
-        <small data-role="band-readout"></small>
       </div>
-    </div>
-    <div class="parameter-actions">
-      <button class="primary-button" data-role="apply" type="button">应用并重新分析</button>
-      <button class="secondary-button" data-role="reset" type="button">恢复推荐值</button>
-      <p class="inline-notice" data-role="parameter-status" aria-live="polite"></p>
-    </div>
-    <p class="parameter-hint">参数需点击“应用并重新分析”后生效，且只对当前会话中仍可用的录音文件重新分析；已保存的复核结论不受影响。</p>`;
+      <div class="parameter-actions">
+        <button class="primary-button" data-role="apply" type="button">应用并重新分析</button>
+        <button class="secondary-button" data-role="reset" type="button">恢复推荐值</button>
+        <p class="inline-notice" data-role="parameter-status" aria-live="polite"></p>
+      </div>
+      <p class="parameter-hint">参数需点击“应用并重新分析”后生效，且只对当前会话中仍可用的录音文件重新分析；已保存的复核结论不受影响。</p>
+    </div>`;
   const thresholdInput = parameterSection.querySelector('[data-role="threshold"]');
   const bandLowInput = parameterSection.querySelector('[data-role="band-low"]');
   const bandHighInput = parameterSection.querySelector('[data-role="band-high"]');
@@ -243,6 +246,14 @@ export async function mountApp(root) {
     bandHighInput.value = String(DEFAULT_PARAMETERS.energyBandHz[1]);
     updateBandUi();
     parameterStatus.textContent = "已恢复推荐值，点击“应用并重新分析”后生效。";
+  });
+  const parameterBody = parameterSection.querySelector('[data-role="parameter-body"]');
+  const parameterToggle = parameterSection.querySelector('[data-role="parameter-toggle"]');
+  parameterToggle.addEventListener("click", () => {
+    const expanded = parameterBody.hidden;
+    parameterBody.hidden = !expanded;
+    parameterToggle.textContent = expanded ? "收起" : "展开";
+    parameterToggle.setAttribute("aria-expanded", String(expanded));
   });
   const review = new ReviewWorkspace({
     onSave: async (savedReview) => {
