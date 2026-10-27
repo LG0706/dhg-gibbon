@@ -145,10 +145,14 @@ export async function mountApp(root) {
   parameterSection.innerHTML = `
     <div class="section-heading">
       <div>
-        <h2 id="parameter-heading">分析参数</h2>
-        <p>可按需修改 RIBBIT 分数门槛与检测频率范围；不修改则直接使用东黑冠长臂猿推荐值。</p>
+        <div class="parameter-title-row">
+          <h2 id="parameter-heading">分析参数</h2>
+          <button class="parameter-toggle" data-role="parameter-toggle" type="button" aria-expanded="false" aria-controls="parameter-body" aria-label="展开分析参数">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+        </div>
+        <p>可按需修改 RIBBIT 分数门槛与检测频率范围；不修改则直接使用默认推荐值。</p>
       </div>
-      <button class="secondary-button" data-role="parameter-toggle" type="button" aria-expanded="false" aria-controls="parameter-body">展开</button>
     </div>
     <div id="parameter-body" data-role="parameter-body" hidden>
       <div class="parameter-grid">
@@ -252,8 +256,8 @@ export async function mountApp(root) {
   parameterToggle.addEventListener("click", () => {
     const expanded = parameterBody.hidden;
     parameterBody.hidden = !expanded;
-    parameterToggle.textContent = expanded ? "收起" : "展开";
     parameterToggle.setAttribute("aria-expanded", String(expanded));
+    parameterToggle.setAttribute("aria-label", expanded ? "收起分析参数" : "展开分析参数");
   });
   const review = new ReviewWorkspace({
     onSave: async (savedReview) => {
