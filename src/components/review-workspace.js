@@ -2,6 +2,15 @@ import { renderAnalysisCanvas } from "../render.js";
 
 const DECISIONS = ["待确认", "确认有长臂猿", "疑似", "没有长臂猿", "其他动物", "噪声"];
 
+function formatTime(totalSeconds) {
+  const seconds = Math.max(0, Math.floor(Number.isFinite(totalSeconds) ? totalSeconds : 0));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const rest = seconds % 60;
+  if (hours > 0) return `${hours}:${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;
+  return `${minutes}:${String(rest).padStart(2, "0")}`;
+}
+
 export class ReviewWorkspace {
   constructor({ onSave }) {
     this.onSave = onSave;
@@ -9,6 +18,10 @@ export class ReviewWorkspace {
     this.reviews = new Map();
     this.files = new Map();
     this.audioUrl = null;
+    this.audioKey = null;
+    this.audioDuration = 0;
+    this.tickId = null;
+    this.seeking = false;
     this.element = document.createElement("section");
     this.element.className = "review-section";
     this.element.setAttribute("aria-labelledby", "review-heading");
@@ -17,6 +30,23 @@ export class ReviewWorkspace {
         <div>
           <h2 id="review-heading">人工复核</h2>
           <p>RIBBIT 评分用于排序，不代表概率。请结合整段状态与频谱确认。</p>
+        </div>
+      </div>
+      <div class="audio-bar" data-role="audio-bar" hidden>
+        <audio data-role="audio" preload="metadata"></audio>
+        <div class="audio-bar-controls">
+          <button class="secondary-button" data-role="play" type="button">播放</button>
+          <span class="audio-time numeric" data-role="time">0:00 / 0:00</span>
+        </div>
+        <div class="timeline" data-role="timeline" tabindex="0" role="slider" aria-label="录音时间轴：点击定位，左右方向键前后 1 秒，加 Shift 为 5 秒，空格播放或暂停" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0" aria-valuetext="0:00 / 0:00">
+          <div class="timeline-progress" data-role="progress"></div>
+          <div class="timeline-segments" data-role="segments"></div>
+          <div class="timeline-playhead" data-role="playhead"></div>
+        </div>
+        <div class="audio-bar-actions">
+          <button class="secondary-button" data-role="seek-back" type="button">−5 秒</button>
+          <button class="secondary-button" data-role="seek-forward" type="button">+5 秒</button>
+          <button class="secondary-button" data-role="jump-candidate" type="button">跳到片段</button>
         </div>
       </div>
       <div class="review-grid">
@@ -44,7 +74,6 @@ export class ReviewWorkspace {
             <span>备注</span>
             <textarea data-role="note" rows="3" placeholder="记录物种、噪声或复核依据"></textarea>
           </label>
-          <div class="audio-slot" data-role="audio"></div>
           <button class="primary-button" type="submit">保存复核</button>
           <p class="inline-notice" data-role="saved" aria-live="polite"></p>
         </form>
@@ -71,6 +100,50 @@ export class ReviewWorkspace {
     this.canvas = this.element.querySelector('[data-role="canvas"]');
     this.chartDialog = this.element.querySelector('[data-role="chart-dialog"]');
     this.largeChart = this.element.querySelector('[data-role="large-chart"]');
+    this.audioBar = this.element.querySelector('[data-role="audio-bar"]');
+    this.audio = this.element.querySelector('[data-role="audio"]');
+    this.playButton = this.element.querySelector('[data-role="play"]');
+    this.timeDisplay = this.element.querySelector('[data-role="time"]');
+    this.timeline = this.element.querySelector('[data-role="timeline"]');
+    this.progressEl = this.element.querySelector('[data-role="progress"]');
+    this.segmentsEl = this.element.querySelector('[data-role="segments"]');
+    this.playheadEl = this.element.querySelector('[data-role="playhead"]');
+    this.playButton.addEventListener("click", () => this.togglePlay());
+    this.element.querySelector('[data-role="seek-back"]').addEventListener("click", () => this.seekBy(-5));
+    this.element.querySelector('[data-role="seek-forward"]').addEventListener("click", () => this.seekBy(5));
+    this.element.querySelector('[data-role="jump-candidate"]').addEventListener("click", () => this.jumpToCandidate());
+    this.timeline.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      this.seeking = true;
+      this.timeline.setPointerCapture(event.pointerId);
+      this.seekFromPointer(event);
+    });
+    this.timeline.addEventListener("pointermove", (event) => {
+      if (this.seeking) this.seekFromPointer(event);
+    });
+    for (const eventName of ["pointerup", "pointercancel"]) {
+      this.timeline.addEventListener(eventName, () => { this.seeking = false; });
+    }
+    this.timeline.addEventListener("keydown", (event) => {
+      const step = event.shiftKey ? 5 : 1;
+      if (event.key === "ArrowLeft") { event.preventDefault(); this.seekBy(-step); }
+      else if (event.key === "ArrowRight") { event.preventDefault(); this.seekBy(step); }
+      else if (event.key === "Home") { event.preventDefault(); this.seekTo(0); }
+      else if (event.key === "End") { event.preventDefault(); this.seekTo(this.audioDuration); }
+      else if (event.key === " " || event.key === "Enter") { event.preventDefault(); this.togglePlay(); }
+    });
+    this.audio.addEventListener("play", () => { this.updatePlayButton(); this.startTicking(); });
+    this.audio.addEventListener("pause", () => { this.updatePlayButton(); this.stopTicking(); this.updatePlayhead(); });
+    this.audio.addEventListener("ended", () => { this.updatePlayButton(); this.stopTicking(); this.updatePlayhead(); });
+    this.audio.addEventListener("timeupdate", () => this.updatePlayhead());
+    this.audio.addEventListener("loadedmetadata", () => {
+      this.audioDuration = Number.isFinite(this.audio.duration) ? this.audio.duration : 0;
+      this.updatePlayhead();
+    });
+    this.audio.addEventListener("durationchange", () => {
+      this.audioDuration = Number.isFinite(this.audio.duration) ? this.audio.duration : 0;
+      this.updatePlayhead();
+    });
     this.selector.addEventListener("change", () => this.renderSelected());
     this.previousButton.addEventListener("click", () => this.moveSelection(-1));
     this.nextButton.addEventListener("click", () => this.moveSelection(1));
@@ -198,7 +271,7 @@ export class ReviewWorkspace {
     context.font = "22px system-ui";
     context.textAlign = "center";
     context.fillText("分析完成后，候选片段会显示在这里。", 480, 280);
-    this.renderAudio(null);
+    this.updateAudioForEntry(null);
   }
 
   renderSelected() {
@@ -223,23 +296,134 @@ export class ReviewWorkspace {
       ? ""
       : "未发现候选片段，可对整段录音保存复核结论。";
     renderAnalysisCanvas(this.canvas, entry.result, entry.candidate?.candidate_id);
-    this.renderAudio(this.files.get(entry.recordingKey) ?? null);
+    this.updateAudioForEntry(entry);
   }
 
-  renderAudio(file) {
-    const slot = this.element.querySelector('[data-role="audio"]');
+  updateAudioForEntry(entry) {
+    const file = entry ? (this.files.get(entry.recordingKey) ?? null) : null;
+    const justLoaded = this.ensureAudio(file, entry ? entry.recordingKey : null);
+    this.audioBar.hidden = !file;
+    this.renderTimelineMarkers(entry);
+    if (!file) {
+      this.audioDuration = 0;
+      this.updatePlayhead();
+      return;
+    }
+    if (entry.candidate) {
+      this.seekTo(entry.candidate.boutStart);
+    } else if (justLoaded) {
+      this.seekTo(0);
+    }
+  }
+
+  ensureAudio(file, key) {
+    if (key === this.audioKey && this.audioUrl) return false;
     if (this.audioUrl) URL.revokeObjectURL(this.audioUrl);
     this.audioUrl = null;
-    slot.replaceChildren();
-    if (!file) return;
-    this.audioUrl = URL.createObjectURL(file);
-    const label = document.createElement("span");
-    label.textContent = "原始录音";
-    const audio = document.createElement("audio");
-    audio.controls = true;
-    audio.preload = "metadata";
-    audio.src = this.audioUrl;
-    slot.append(label, audio);
+    this.audioKey = key;
+    this.audioDuration = 0;
+    this.stopTicking();
+    this.audio.pause();
+    this.audio.removeAttribute("src");
+    this.audio.load();
+    if (file) {
+      this.audioUrl = URL.createObjectURL(file);
+      this.audio.src = this.audioUrl;
+    }
+    return true;
+  }
+
+  renderTimelineMarkers(entry) {
+    this.segmentsEl.replaceChildren();
+    const result = entry?.result;
+    const duration = result?.metrics?.audioSeconds;
+    if (!result || !Number.isFinite(duration) || duration <= 0) return;
+    const toPercent = (value) => `${(Math.min(duration, Math.max(0, value)) / duration) * 100}%`;
+    for (const detection of result.detections ?? []) {
+      const tick = document.createElement("span");
+      tick.className = "timeline-detection";
+      tick.style.left = toPercent(detection.start);
+      tick.style.width = `max(${toPercent(detection.end - detection.start)}, 2px)`;
+      tick.title = `检测片段 ${detection.start.toFixed(1)}–${detection.end.toFixed(1)} 秒 · RIBBIT ${detection.ribbit.toFixed(4)}`;
+      this.segmentsEl.append(tick);
+    }
+    for (const candidate of result.candidates ?? []) {
+      const marker = document.createElement("span");
+      marker.className = candidate.candidate_id === entry.candidate?.candidate_id
+        ? "timeline-candidate is-selected"
+        : "timeline-candidate";
+      marker.style.left = toPercent(candidate.boutStart);
+      marker.style.width = `max(${toPercent(candidate.boutEnd - candidate.boutStart)}, 3px)`;
+      marker.title = `候选片段 ${candidate.boutStart.toFixed(1)}–${candidate.boutEnd.toFixed(1)} 秒 · RIBBIT ${candidate.ribbit.toFixed(4)}`;
+      this.segmentsEl.append(marker);
+    }
+  }
+
+  seekTo(seconds) {
+    if (!Number.isFinite(seconds) || seconds < 0) return;
+    if (this.audioDuration > 0) seconds = Math.min(seconds, this.audioDuration);
+    this.audio.currentTime = seconds;
+    this.updatePlayhead();
+  }
+
+  seekBy(delta) {
+    this.seekTo((this.audio.currentTime || 0) + delta);
+  }
+
+  jumpToCandidate() {
+    const entry = this.selectedEntry();
+    const target = entry?.candidate ? entry.candidate.boutStart : 0;
+    this.seekTo(target);
+  }
+
+  togglePlay() {
+    if (this.audioBar.hidden) return;
+    if (this.audio.paused) {
+      this.audio.play().catch(() => { /* 浏览器策略或解码失败时保持暂停 */ });
+    } else {
+      this.audio.pause();
+    }
+  }
+
+  seekFromPointer(event) {
+    if (this.audioDuration <= 0) return;
+    const rect = this.timeline.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const fraction = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+    this.seekTo(fraction * this.audioDuration);
+  }
+
+  updatePlayButton() {
+    this.playButton.textContent = this.audio.paused ? "播放" : "暂停";
+  }
+
+  updatePlayhead() {
+    const current = this.audio.currentTime || 0;
+    const fraction = this.audioDuration > 0 ? Math.min(1, current / this.audioDuration) : 0;
+    const percent = `${(fraction * 100).toFixed(4)}%`;
+    this.playheadEl.style.left = percent;
+    this.progressEl.style.width = percent;
+    const label = `${formatTime(current)} / ${formatTime(this.audioDuration)}`;
+    if (this.timeDisplay.textContent !== label) this.timeDisplay.textContent = label;
+    this.timeline.setAttribute("aria-valuenow", String(Math.round(current)));
+    this.timeline.setAttribute("aria-valuemax", String(Math.round(this.audioDuration)));
+    this.timeline.setAttribute("aria-valuetext", label);
+  }
+
+  startTicking() {
+    if (this.tickId !== null) return;
+    const tick = () => {
+      this.updatePlayhead();
+      this.tickId = globalThis.requestAnimationFrame(tick);
+    };
+    this.tickId = globalThis.requestAnimationFrame(tick);
+  }
+
+  stopTicking() {
+    if (this.tickId !== null) {
+      globalThis.cancelAnimationFrame(this.tickId);
+      this.tickId = null;
+    }
   }
 }
 

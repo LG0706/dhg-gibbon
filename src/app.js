@@ -59,6 +59,10 @@ export async function mountApp(root) {
         <h1>长臂猿录音筛查</h1>
         <p>选择 PCM WAV 录音，完成检测、复核与导出。</p>
       </header>
+      <div class="warning-banner">
+        <strong>漏检提示</strong>
+        <span>本程序无法避免丢掉假阴性数据，即算法漏掉但其实有长臂猿声音的数据（大概率质量差），望知晓！</span>
+      </div>
       <div class="privacy-banner">
         <strong>本地处理</strong>
         <span>音频字节仅进入当前浏览器的分析工作线程，不会发送到网络，也不会保存到 IndexedDB。</span>
@@ -88,6 +92,7 @@ export async function mountApp(root) {
   const errors = records.filter((record) => record.error).map((record) => ({ filename: record.name, ...record.error }));
   const existingKeys = new Set(records.map((record) => record.key));
   let analysisClient = new AnalysisClient();
+  let parameters = { ...DEFAULT_PARAMETERS, energyBandHz: [...DEFAULT_PARAMETERS.energyBandHz] };
   const devicePreferences = loadDevicePreferences(records);
   let currentDevice = devicePreferences.current;
   const knownDevices = new Set(devicePreferences.devices);
@@ -132,6 +137,112 @@ export async function mountApp(root) {
     initialDevice: currentDevice,
     devices: knownDevices,
     onDeviceChange: updateCurrentDevice,
+  });
+
+  const parameterSection = document.createElement("section");
+  parameterSection.className = "parameter-panel";
+  parameterSection.setAttribute("aria-labelledby", "parameter-heading");
+  parameterSection.innerHTML = `
+    <div class="section-heading">
+      <div>
+        <h2 id="parameter-heading">分析参数</h2>
+        <p>仅开放两项常用设置，其余参数保持东黑冠长臂猿推荐值不变。</p>
+      </div>
+    </div>
+    <div class="parameter-grid">
+      <label class="field">
+        <span>RIBBIT 分数门槛（0–1）</span>
+        <input type="number" data-role="threshold" min="0" max="1" step="0.01" value="0.1" inputmode="decimal" />
+        <small>评分高于该值的片段才进入人工复核。调低→进入复核的片段更多；调高→更少。推荐值 0.1。</small>
+      </label>
+      <div class="field">
+        <span>检测频率范围（Hz）</span>
+        <div class="dual-range">
+          <div class="dual-range-track"></div>
+          <div class="dual-range-fill" data-role="band-fill"></div>
+          <input type="range" data-role="band-low" min="1000" max="2000" step="10" value="1300" aria-label="检测频率下限（Hz）" />
+          <input type="range" data-role="band-high" min="1000" max="2000" step="10" value="1600" aria-label="检测频率上限（Hz）" />
+        </div>
+        <small data-role="band-readout"></small>
+      </div>
+    </div>
+    <div class="parameter-actions">
+      <button class="primary-button" data-role="apply" type="button">应用并重新分析</button>
+      <button class="secondary-button" data-role="reset" type="button">恢复推荐值</button>
+      <p class="inline-notice" data-role="parameter-status" aria-live="polite"></p>
+    </div>
+    <p class="parameter-hint">参数需点击“应用并重新分析”后生效，且只对当前会话中仍可用的录音文件重新分析；已保存的复核结论不受影响。</p>`;
+  const thresholdInput = parameterSection.querySelector('[data-role="threshold"]');
+  const bandLowInput = parameterSection.querySelector('[data-role="band-low"]');
+  const bandHighInput = parameterSection.querySelector('[data-role="band-high"]');
+  const bandFill = parameterSection.querySelector('[data-role="band-fill"]');
+  const bandReadout = parameterSection.querySelector('[data-role="band-readout"]');
+  const applyButton = parameterSection.querySelector('[data-role="apply"]');
+  const resetButton = parameterSection.querySelector('[data-role="reset"]');
+  const parameterStatus = parameterSection.querySelector('[data-role="parameter-status"]');
+  const BAND_MIN = 1000;
+  const BAND_MAX = 2000;
+  const BAND_MIN_GAP = 10;
+
+  function updateBandUi() {
+    const low = Number(bandLowInput.value);
+    const high = Number(bandHighInput.value);
+    bandFill.style.left = `${((low - BAND_MIN) / (BAND_MAX - BAND_MIN)) * 100}%`;
+    bandFill.style.width = `${((high - low) / (BAND_MAX - BAND_MIN)) * 100}%`;
+    bandReadout.textContent = `当前 ${low}–${high} Hz（推荐 ${DEFAULT_PARAMETERS.energyBandHz[0]}–${DEFAULT_PARAMETERS.energyBandHz[1]} Hz）`;
+  }
+
+  bandLowInput.addEventListener("input", () => {
+    const high = Number(bandHighInput.value);
+    if (Number(bandLowInput.value) > high - BAND_MIN_GAP) bandLowInput.value = String(high - BAND_MIN_GAP);
+    updateBandUi();
+  });
+  bandHighInput.addEventListener("input", () => {
+    const low = Number(bandLowInput.value);
+    if (Number(bandHighInput.value) < low + BAND_MIN_GAP) bandHighInput.value = String(low + BAND_MIN_GAP);
+    updateBandUi();
+  });
+  updateBandUi();
+
+  function updateParameterControls() {
+    applyButton.disabled = queue.busy;
+  }
+
+  async function applyParameters() {
+    const raw = thresholdInput.value.trim();
+    const threshold = Number(raw);
+    if (raw === "" || !Number.isFinite(threshold) || threshold < 0 || threshold > 1) {
+      parameterStatus.textContent = "RIBBIT 分数门槛必须是 0 到 1 之间的数字。";
+      return;
+    }
+    const low = Number(bandLowInput.value);
+    const high = Number(bandHighInput.value);
+    if (!Number.isFinite(low) || !Number.isFinite(high) || low + BAND_MIN_GAP > high) {
+      parameterStatus.textContent = "检测频率范围无效：下限必须至少比上限低 10 Hz。";
+      return;
+    }
+    parameters.candidateScoreThreshold = Math.round(threshold * 100) / 100;
+    parameters.energyBandHz = [low, high];
+    const targets = records.filter((record) => record.file && storedResults.has(record.key));
+    if (targets.length === 0) {
+      parameterStatus.textContent = `参数已更新（门槛 ${parameters.candidateScoreThreshold}，${low}–${high} Hz）；当前会话没有可重新分析的录音文件，新参数将用于之后新分析的录音。`;
+      return;
+    }
+    parameterStatus.textContent = `正在按新参数重新分析 ${targets.length} 个录音…`;
+    await processSequentially(targets);
+    const done = targets.filter((record) => storedResults.has(record.key)).length;
+    parameterStatus.textContent = `已按新参数重新分析：成功 ${done} 个，失败 ${targets.length - done} 个（门槛 ${parameters.candidateScoreThreshold}，${low}–${high} Hz）。`;
+  }
+
+  applyButton.addEventListener("click", () => {
+    void applyParameters();
+  });
+  resetButton.addEventListener("click", () => {
+    thresholdInput.value = String(DEFAULT_PARAMETERS.candidateScoreThreshold);
+    bandLowInput.value = String(DEFAULT_PARAMETERS.energyBandHz[0]);
+    bandHighInput.value = String(DEFAULT_PARAMETERS.energyBandHz[1]);
+    updateBandUi();
+    parameterStatus.textContent = "已恢复推荐值，点击“应用并重新分析”后生效。";
   });
   const review = new ReviewWorkspace({
     onSave: async (savedReview) => {
@@ -186,7 +297,7 @@ export async function mountApp(root) {
     }
   });
 
-  workspace.append(importPanel.element, queue.element, review.element, exportSection);
+  workspace.append(importPanel.element, parameterSection, queue.element, review.element, exportSection);
   refresh();
 
   async function persistBatch() {
@@ -297,6 +408,7 @@ export async function mountApp(root) {
     const availableFiles = new Map(records.filter((record) => record.file).map((record) => [record.key, record.file]));
     review.setData(results, Array.from(reviews.values()), availableFiles);
     exportButton.disabled = storedResults.size === 0;
+    updateParameterControls();
     renderSavedReviews();
   }
 
@@ -323,6 +435,7 @@ export async function mountApp(root) {
 
   async function processSequentially(pending) {
     queue.setBusy(true);
+    updateParameterControls();
     try {
       for (const record of pending) {
         if (!records.includes(record)) continue;
@@ -332,7 +445,7 @@ export async function mountApp(root) {
             record.id,
             record.file,
             { recording: record.name, device: record.device },
-            DEFAULT_PARAMETERS,
+            parameters,
             ({ phase, bytesRead, totalBytes }) => {
               const fraction = totalBytes > 0 ? bytesRead / totalBytes : 0;
               queue.updateRecord(record.id, { progress: phase === "features" ? fraction * 0.5 : 0.5 + fraction * 0.5 });
@@ -360,6 +473,7 @@ export async function mountApp(root) {
       await analysisClient.finishBatch();
     } finally {
       queue.setBusy(false);
+      updateParameterControls();
       refresh();
     }
   }
