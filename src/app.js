@@ -6,6 +6,8 @@ import { ReviewWorkspace } from "./components/review-workspace.js";
 import { createStorage } from "./storage.js";
 import { createAnalysisImageBlob, IMAGE_RENDERER_VERSION } from "./render.js";
 import { downloadExport } from "./export.js";
+import { marked } from "marked";
+import manualMarkdown from "../长臂猿录音筛查工具使用说明.md?raw";
 
 function createId() {
   return globalThis.crypto?.randomUUID?.() ?? `recording-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -57,7 +59,10 @@ export async function mountApp(root) {
     <main id="main-content" class="app-shell">
       <header class="app-header">
         <h1>长臂猿录音筛查</h1>
-        <p>选择 PCM WAV 录音，完成检测、复核与导出。</p>
+        <button class="manual-button" data-role="manual-open" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+          使用说明
+        </button>
       </header>
       <div class="warning-banner">
         <strong>漏检提示</strong>
@@ -71,10 +76,27 @@ export async function mountApp(root) {
       <div class="workspace" data-role="workspace" aria-busy="true">
         <p class="loading-state">正在打开本地结果存储…</p>
       </div>
-    </main>`;
+    </main>
+    <dialog class="manual-dialog" data-role="manual-dialog" aria-labelledby="manual-dialog-heading">
+      <div class="manual-dialog-header">
+        <h3 id="manual-dialog-heading">使用说明</h3>
+        <button class="secondary-button" data-role="close-manual" type="button">关闭</button>
+      </div>
+      <div class="manual-body" data-role="manual-body"></div>
+    </dialog>`;
 
   const workspace = root.querySelector('[data-role="workspace"]');
   const warningBanner = root.querySelector('[data-role="storage-warning"]');
+  const manualDialog = root.querySelector('[data-role="manual-dialog"]');
+  const manualBody = root.querySelector('[data-role="manual-body"]');
+  root.querySelector('[data-role="manual-open"]').addEventListener("click", () => {
+    if (!manualBody.hasChildNodes()) manualBody.innerHTML = marked.parse(manualMarkdown.replace(/^网站地址：.*$/m, ""));
+    manualDialog.showModal();
+  });
+  root.querySelector('[data-role="close-manual"]').addEventListener("click", () => manualDialog.close());
+  manualDialog.addEventListener("click", (event) => {
+    if (event.target === manualDialog) manualDialog.close();
+  });
   const storage = await createStorage();
   if (storage.warning) {
     warningBanner.hidden = false;
